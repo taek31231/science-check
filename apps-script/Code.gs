@@ -243,7 +243,7 @@ function buildClassSheet(sh, classNo) {
   sh.getRange(1, 1, 1, L.lastCol)
     .setBackground(COLORS.title).setFontColor('#ffffff').setFontWeight('bold').setFontSize(12)
     .setVerticalAlignment('middle');
-  sh.getRange(1, 1, 1, COL.NAME).merge().setValue(className(classNo))
+  sh.getRange(1, 1, 1, COL.NAME).merge().setNumberFormat('@').setValue(className(classNo))  // '1-3' 이 날짜로 바뀌지 않게
     .setFontSize(14).setHorizontalAlignment('center');
   sh.getRange(1, COL.CAREER).setWrap(false).setValue('통합과학 · 과학탐구실험 세특 작성 시트   ' +
       CONFIG.SUBJECTS.filter(function (s) { return s.classTeachers && s.classTeachers[classNo]; })
