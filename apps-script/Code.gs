@@ -239,13 +239,16 @@ function buildClassSheet(sh, classNo) {
   if (sh.getMaxRows() < lastRow) sh.insertRowsAfter(sh.getMaxRows(), lastRow - sh.getMaxRows());
 
   // ---- 1행: 제목
-  sh.getRange(1, 1, 1, L.lastCol).merge()
-    .setValue(className(classNo) + '  통합과학 · 과학탐구실험 세특 작성 시트   ' +
-      CONFIG.SUBJECTS.filter(function (s) { return s.classTeachers && s.classTeachers[classNo]; })
-        .map(function (s) { return '[' + s.name + ' 담당: ' + s.classTeachers[classNo] + ']  '; }).join('') +
-      '(회색 칸 = 학생이 선택하지 않은 활동, 노란 칸 = 기록 작성 대상)')
+  // (고정 열(A~C) 경계를 넘는 병합은 열 고정이 불가하므로 A1:C1 만 병합)
+  sh.getRange(1, 1, 1, L.lastCol)
     .setBackground(COLORS.title).setFontColor('#ffffff').setFontWeight('bold').setFontSize(12)
     .setVerticalAlignment('middle');
+  sh.getRange(1, 1, 1, COL.NAME).merge().setValue(className(classNo))
+    .setFontSize(14).setHorizontalAlignment('center');
+  sh.getRange(1, COL.CAREER).setWrap(false).setValue('통합과학 · 과학탐구실험 세특 작성 시트   ' +
+      CONFIG.SUBJECTS.filter(function (s) { return s.classTeachers && s.classTeachers[classNo]; })
+        .map(function (s) { return '[' + s.name + ' 담당: ' + s.classTeachers[classNo] + ']  '; }).join('') +
+      '(회색 칸 = 학생이 선택하지 않은 활동, 노란 칸 = 기록 작성 대상)');
   sh.setRowHeight(1, 32);
 
   // ---- 고정 열 헤더
