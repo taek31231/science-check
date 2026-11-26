@@ -19,7 +19,7 @@ const CONFIG = {
   REQUIRE_ROSTER: true,     // true: 교사가 입력한 명단(이름)과 일치해야 제출 가능
   OPEN: true,               // false 로 바꾸면 학생 제출 마감
   BYTE_LIMIT: 1500,         // 과목별 세특 바이트 한도 (나이스 기준)
-  TEACHERS: ['교사A', '교사B', '교사C', '교사D'],  // 협업 교사 4명 (담당 교사 드롭다운)
+  TEACHERS: ['황율예', '이수영', '유자현', '임형택'],  // 협업 교사 (담당 교사 드롭다운)
   PROGRESS: ['미착수', '작성중', '검토요청', '수정필요', '완료'],
 
   SUBJECTS: [
@@ -28,17 +28,18 @@ const CONFIG = {
       name: '통합과학',
       min: 1,
       max: 4,
+      // 통합과학: 활동마다 기록 담당 교사(teacher)
       activities: [
-        { name: '수평 방향으로 던진 물체의 운동 분석', desc: '' },   // desc: 학생 화면에 보이는 한 줄 설명(선택)
-        { name: '화학 결합의 종류에 따른 물질의 성질 탐구', desc: '' },
-        { name: '일상생활 속 효소가 활용되는 사례 탐색', desc: '' },
-        { name: '탄소 순환을 활용한 지구 시스템의 상호작용의 탐구', desc: '' },
-        { name: '시뮬레이션을 활용한 판구조론 탐구', desc: '' },
-        { name: '전자기 유도 현상 탐구', desc: '' },
-        { name: '산화 환원 반응 실험 탐구', desc: '' },
-        { name: '생물의 진화 및 생물다양성 변화 과정 탐구', desc: '' },
-        { name: '통합과학 포트폴리오 활동(D)', desc: '' },
-        { name: '대멸종 판정에 대한 근거 기반 토론', desc: '' },
+        { name: '수평 방향으로 던진 물체의 운동 분석', teacher: '황율예', desc: '' },   // desc: 학생 화면에 보이는 한 줄 설명(선택)
+        { name: '화학 결합의 종류에 따른 물질의 성질 탐구', teacher: '이수영', desc: '' },
+        { name: '일상생활 속 효소가 활용되는 사례 탐색', teacher: '유자현', desc: '' },
+        { name: '탄소 순환을 활용한 지구 시스템의 상호작용의 탐구', teacher: '임형택', desc: '' },
+        { name: '시뮬레이션을 활용한 판구조론 탐구', teacher: '임형택', desc: '' },
+        { name: '전자기 유도 현상 탐구', teacher: '황율예', desc: '' },
+        { name: '산화 환원 반응 실험 탐구', teacher: '이수영', desc: '' },
+        { name: '생물의 진화 및 생물다양성 변화 과정 탐구', teacher: '유자현', desc: '' },
+        { name: '통합과학 포트폴리오 활동(D)', teacher: '임형택', desc: '' },
+        { name: '대멸종 판정에 대한 근거 기반 토론', teacher: '임형택', desc: '' },
       ],
     },
     {
@@ -46,6 +47,11 @@ const CONFIG = {
       name: '과학탐구실험',
       min: 1,
       max: 3,
+      // 과학탐구실험: 반별 담당 교사 (해당 반의 모든 활동 기록 + 세특 담당)
+      classTeachers: {
+        1: '이수영', 2: '이수영', 3: '유자현', 4: '유자현', 5: '이수영',
+        6: '임형택', 7: '임형택', 8: '임형택', 9: '이수영', 10: '유자현',
+      },
       activities: [
         { name: '자유 낙하하는 물체의 운동 분석', desc: '' },   // desc: 학생 화면에 보이는 한 줄 설명(선택)
         { name: '멘델레예프의 주기율표 만들기', desc: '' },
@@ -109,6 +115,12 @@ function getLayout() {
     return block;
   });
   return { subjects: subjects, note: col, lastCol: col };
+}
+
+/** 해당 반·활동의 기록 담당 교사 */
+function activityTeacher(s, i, classNo) {
+  if (s.classTeachers && s.classTeachers[classNo]) return s.classTeachers[classNo];
+  return s.activities[i].teacher || '';
 }
 
 function className(n) {
@@ -189,6 +201,8 @@ function buildClassSheet(sh, classNo) {
   // ---- 1행: 제목
   sh.getRange(1, 1, 1, L.lastCol).merge()
     .setValue(className(classNo) + '  통합과학 · 과학탐구실험 세특 작성 시트   ' +
+      CONFIG.SUBJECTS.filter(function (s) { return s.classTeachers && s.classTeachers[classNo]; })
+        .map(function (s) { return '[' + s.name + ' 담당: ' + s.classTeachers[classNo] + ']  '; }).join('') +
       '(회색 칸 = 학생이 선택하지 않은 활동, 노란 칸 = 기록 작성 대상)')
     .setBackground(COLORS.title).setFontColor('#ffffff').setFontWeight('bold').setFontSize(12)
     .setVerticalAlignment('middle');
@@ -213,7 +227,8 @@ function buildClassSheet(sh, classNo) {
 
     s.activities.forEach(function (a, i) {
       const c = b.acts[i];
-      sh.getRange(3, c.sel, 1, 2).merge().setValue((i + 1) + '. ' + a.name)
+      const t = activityTeacher(s, i, classNo);
+      sh.getRange(3, c.sel, 1, 2).merge().setValue((i + 1) + '. ' + a.name + (t && !s.classTeachers ? '\n(' + t + ')' : ''))
         .setBackground(light).setFontWeight('bold').setWrap(true);
       sh.getRange(4, c.sel).setValue('선택');
       sh.getRange(4, c.memo).setValue('활동 기록');
@@ -301,6 +316,9 @@ function buildClassSheet(sh, classNo) {
 
     sh.getRange(DATA_START, b.teacher, nRows, 1).setDataValidation(
       SpreadsheetApp.newDataValidation().requireValueInList(CONFIG.TEACHERS, true).build());
+    if (s.classTeachers && s.classTeachers[classNo]) {
+      sh.getRange(DATA_START, b.teacher, nRows, 1).setValue(s.classTeachers[classNo]);
+    }
     sh.getRange(DATA_START, b.progress, nRows, 1).setDataValidation(
       SpreadsheetApp.newDataValidation().requireValueInList(CONFIG.PROGRESS, true).build());
 
@@ -376,7 +394,7 @@ function buildClassSheet(sh, classNo) {
     sh.setColumnWidth(b.progress, 85);
   });
   sh.setColumnWidth(L.note, 200);
-  sh.setRowHeight(3, 48);
+  sh.setRowHeight(3, 64);
   sh.setFrozenRows(HEADER_ROWS);
   sh.setFrozenColumns(COL.NAME);
 
@@ -476,28 +494,82 @@ function rebuildSummary() {
     .setBorder(true, true, true, true, true, true, '#bdbdbd', SpreadsheetApp.BorderStyle.SOLID);
   sh.getRange(4, 1, rows.length + 1, head.length - 1).setHorizontalAlignment('center');
 
-  // 활동별 선택 인원
+  const sel = function (n, c) { return 'COUNTIF(' + rng(className(n), c.sel) + ',TRUE)'; };
+  const done = function (n, c) {
+    return 'COUNTIFS(' + rng(className(n), c.sel) + ',TRUE,' + rng(className(n), c.memo) + ',"<>")';
+  };
+  const sumOf = function (parts) { return parts.length ? '=IFERROR(SUM(' + parts.join(',') + '),0)' : '=0'; };
+  const tableHead = function (r, values, color) {
+    sh.getRange(r, 1, 1, values.length).setValues([values])
+      .setBackground(color).setFontColor('#ffffff').setFontWeight('bold')
+      .setHorizontalAlignment('center').setWrap(true);
+  };
+
+  // 교사별 활동 기록 현황 (학생이 선택한 활동 중 '활동 기록' 칸이 채워진 수)
   let r0 = totalRow + 3;
+  sh.getRange(r0 - 1, 1).setValue('교사별 활동 기록 현황 (학생이 선택한 활동의 기록 칸 기준)')
+    .setFontWeight('bold').setFontSize(12);
+  tableHead(r0, ['교사', '담당', '기록할 건수', '기록 완료', '남은 기록', '진행률'], COLORS.title);
+  const tRows = CONFIG.TEACHERS.map(function (t, ti) {
+    const selP = [];
+    const doneP = [];
+    const desc = [];
+    CONFIG.SUBJECTS.forEach(function (s, si) {
+      const b = L.subjects[si];
+      const acts = [];
+      const classes = [];
+      for (let n = 1; n <= CONFIG.CLASS_COUNT; n++) {
+        s.activities.forEach(function (a, i) {
+          if (activityTeacher(s, i, n) !== t) return;
+          selP.push(sel(n, b.acts[i]));
+          doneP.push(done(n, b.acts[i]));
+          if (acts.indexOf(i + 1) === -1) acts.push(i + 1);
+          if (classes.indexOf(n) === -1) classes.push(n);
+        });
+      }
+      if (!acts.length) return;
+      desc.push(s.classTeachers
+        ? s.name + ' ' + classes.map(className).join(', ') + '반'
+        : s.name + ' ' + acts.join(', ') + '번 활동');
+    });
+    const r = r0 + 1 + ti;
+    return [t, desc.join(' / ') || '-', sumOf(selP), sumOf(doneP),
+      '=C' + r + '-D' + r, '=IFERROR(D' + r + '/C' + r + ',"")'];
+  });
+  sh.getRange(r0 + 1, 1, tRows.length, 6).setFormulas(tRows);
+  sh.getRange(r0 + 1, 6, tRows.length, 1).setNumberFormat('0%');
+  sh.getRange(r0 + 1, 3, tRows.length, 4).setHorizontalAlignment('center');
+  sh.getRange(r0 + 1, 2, tRows.length, 1).setWrap(true);
+  sh.getRange(r0, 1, tRows.length + 1, 6)
+    .setBorder(true, true, true, true, true, true, '#bdbdbd', SpreadsheetApp.BorderStyle.SOLID);
+
+  // 활동별 선택 인원 / 기록 현황
+  r0 += tRows.length + 4;
   sh.getRange(r0 - 1, 1).setValue('활동별 선택 인원 (전체 반 합계)').setFontWeight('bold').setFontSize(12);
   CONFIG.SUBJECTS.forEach(function (s, si) {
     const b = L.subjects[si];
-    sh.getRange(r0, 1, 1, 3).setValues([[s.name, '활동', '선택 인원']])
-      .setBackground(COLORS.subject[si % COLORS.subject.length]).setFontColor('#ffffff').setFontWeight('bold');
+    tableHead(r0, [s.name, '활동', '담당', '선택 인원', '기록 완료', '남은 기록'],
+      COLORS.subject[si % COLORS.subject.length]);
     const data = s.activities.map(function (a, i) {
-      const parts = [];
+      const selP = [];
+      const doneP = [];
       for (let n = 1; n <= CONFIG.CLASS_COUNT; n++) {
-        parts.push('COUNTIF(' + rng(className(n), b.acts[i].sel) + ',TRUE)');
+        selP.push(sel(n, b.acts[i]));
+        doneP.push(done(n, b.acts[i]));
       }
-      return [String(i + 1), a.name, '=IFERROR(SUM(' + parts.join(',') + '),0)'];
+      const r = r0 + 1 + i;
+      return [String(i + 1), a.name, s.classTeachers ? '반별 담당' : (a.teacher || ''),
+        sumOf(selP), sumOf(doneP), '=D' + r + '-E' + r];
     });
-    sh.getRange(r0 + 1, 1, data.length, 3).setFormulas(data);
-    sh.getRange(r0, 1, data.length + 1, 3)
+    sh.getRange(r0 + 1, 1, data.length, 6).setFormulas(data);
+    sh.getRange(r0 + 1, 3, data.length, 4).setHorizontalAlignment('center');
+    sh.getRange(r0, 1, data.length + 1, 6)
       .setBorder(true, true, true, true, true, true, '#bdbdbd', SpreadsheetApp.BorderStyle.SOLID);
     r0 += data.length + 3;
   });
 
   sh.setColumnWidth(1, 110);
-  sh.setColumnWidth(2, 220);
+  sh.setColumnWidth(2, 300);
   sh.setColumnWidth(head.length, 360);
   sh.setFrozenRows(3);
 }
@@ -515,7 +587,10 @@ function publicConfig() {
     grade: CONFIG.GRADE,
     classCount: CONFIG.CLASS_COUNT,
     subjects: CONFIG.SUBJECTS.map(function (s) {
-      return { key: s.key, name: s.name, min: s.min, max: s.max, activities: s.activities };
+      return {
+        key: s.key, name: s.name, min: s.min, max: s.max,
+        activities: s.activities.map(function (a) { return { name: a.name, desc: a.desc || '' }; }),
+      };
     }),
   };
 }
