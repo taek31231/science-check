@@ -156,10 +156,40 @@ function onOpen() {
     .addToUi();
 }
 
-function setupSheets() {
+/** 이 스크립트가 붙어 있는 스프레드시트 */
+function getSS() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error('스프레드시트에 연결되지 않은 스크립트입니다. ' +
+      'script.google.com 이 아니라, 스프레드시트 메뉴 [확장 프로그램 → Apps Script] 에서 연 편집기에 코드를 붙여 넣어 주세요.');
+  }
+  return ss;
+}
+
+const BUILDING_SUFFIX = ' (생성중)';
+
+/**
+ * 반별 탭·제출기록·현황 탭 생성.
+ * 실행 시간이 길어 중간에 멈추면 다시 실행하세요. 이미 완성된 탭은 건너뛰고 이어서 만듭니다.
+ */
+function setupSheets() {
+  const ss = getSS();
+  const t0 = Date.now();
+  const LIMIT_MS = 4.5 * 60 * 1000;   // Apps Script 실행 한도(6분) 전에 안전하게 멈춤
   const created = [];
   const skipped = [];
+  let unfinished = false;
+
+  const progress = function (text) {
+    Logger.log(text);
+    try { ss.toast(text, '세특 시트 설정', 5); } catch (e) { /* 무시 */ }
+  };
+  progress('시트 생성을 시작합니다…');
+
+  // 이전 실행에서 만들다 멈춘 탭 정리
+  ss.getSheets().forEach(function (sh) {
+    if (sh.getName().slice(-BUILDING_SUFFIX.length) === BUILDING_SUFFIX) ss.deleteSheet(sh);
+  });
 
   for (let n = 1; n <= CONFIG.CLASS_COUNT; n++) {
     const name = className(n);
@@ -167,27 +197,36 @@ function setupSheets() {
       skipped.push(name);
       continue;
     }
-    const sh = ss.insertSheet(name, ss.getSheets().length);
+    if (Date.now() - t0 > LIMIT_MS) { unfinished = true; break; }
+    // 완성 전에는 임시 이름으로 만들고, 다 만든 뒤 이름을 바꿈
+    const sh = ss.insertSheet(name + BUILDING_SUFFIX, ss.getSheets().length);
     buildClassSheet(sh, n);
+    sh.setName(name);
+    SpreadsheetApp.flush();
     created.push(name);
+    progress(name + ' 탭 완료 (' + n + '/' + CONFIG.CLASS_COUNT + ')');
   }
 
-  if (!ss.getSheetByName(LOG_SHEET)) {
-    buildLogSheet(ss.insertSheet(LOG_SHEET, ss.getSheets().length));
-    created.push(LOG_SHEET);
+  if (!unfinished) {
+    if (!ss.getSheetByName(LOG_SHEET)) {
+      buildLogSheet(ss.insertSheet(LOG_SHEET, ss.getSheets().length));
+      created.push(LOG_SHEET);
+    }
+    rebuildSummary();
+
+    // 기본 빈 시트 정리
+    ['시트1', 'Sheet1'].forEach(function (nm) {
+      const sh = ss.getSheetByName(nm);
+      if (sh && ss.getSheets().length > 1 && sh.getLastRow() === 0) ss.deleteSheet(sh);
+    });
   }
-  rebuildSummary();
 
-  // 기본 빈 시트 정리
-  ['시트1', 'Sheet1'].forEach(function (nm) {
-    const sh = ss.getSheetByName(nm);
-    if (sh && ss.getSheets().length > 1 && sh.getLastRow() === 0) ss.deleteSheet(sh);
-  });
-
-  const msg = '생성: ' + (created.join(', ') || '없음') +
-    (skipped.length ? '\n이미 있어 건너뜀: ' + skipped.join(', ') +
-      '\n(다시 만들려면 해당 탭을 삭제 후 재실행)' : '');
-  try { SpreadsheetApp.getUi().alert('설정 완료\n\n' + msg); } catch (e) { Logger.log(msg); }
+  const msg = (unfinished
+    ? '⏸ 실행 시간 한도 때문에 중간에 멈췄습니다. setupSheets 를 한 번 더 실행하면 이어서 만듭니다.\n\n'
+    : '✅ 설정 완료\n\n') +
+    '이번에 생성: ' + (created.join(', ') || '없음') +
+    (skipped.length ? '\n이미 있어 건너뜀: ' + skipped.join(', ') : '');
+  progress(msg);
 }
 
 function buildClassSheet(sh, classNo) {
@@ -432,7 +471,7 @@ function buildLogSheet(sh) {
 
 /** 현황 탭: 반별 제출·작성 진행 상황 + 활동별 선택 인원 */
 function rebuildSummary() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSS();
   let sh = ss.getSheetByName(SUMMARY_SHEET);
   if (sh) sh.clear(); else sh = ss.insertSheet(SUMMARY_SHEET, 0);
   sh.setConditionalFormatRules([]);
@@ -638,7 +677,7 @@ function resolveStudent(id, name) {
   if (no < 1 || no > CONFIG.STUDENTS_PER_CLASS) throw new Error('번호가 올바르지 않습니다.');
   if (!name) throw new Error('이름을 입력하세요.');
 
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(className(cls));
+  const sh = getSS().getSheetByName(className(cls));
   if (!sh) throw new Error('시트가 준비되지 않았습니다. 선생님께 문의하세요.');
   const row = DATA_START + no - 1;
   const roster = normName(sh.getRange(row, COL.NAME).getValue());
@@ -718,7 +757,7 @@ function submit(body) {
     if (off.length) sh.getRangeList(off).uncheck();
 
     // 제출 기록
-    const log = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LOG_SHEET);
+    const log = getSS().getSheetByName(LOG_SHEET);
     if (log) {
       const row = [now, className(st.cls), st.id, st.name, career];
       CONFIG.SUBJECTS.forEach(function (s, si) {
