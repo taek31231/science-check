@@ -89,15 +89,21 @@ const COLORS = {
   over: '#ffcdd2',
 };
 
-/** 과목별 열 위치 계산 */
-function getLayout() {
+/**
+ * 과목별 열 위치 계산
+ * 활동마다 [선택 | 활동 기록 | 바이트] 3칸. legacy=true 는 바이트 칸이 없던 이전 형식(2칸).
+ */
+function getLayout(legacy) {
+  const per = legacy ? 2 : 3;
   let col = FIXED_COLS + 1;
   const subjects = CONFIG.SUBJECTS.map(function (s) {
     const start = col;
     const acts = s.activities.map(function (a, i) {
-      return { sel: start + i * 2, memo: start + i * 2 + 1 };
+      const c = { sel: start + i * per, memo: start + i * per + 1 };
+      if (!legacy) c.bytes = start + i * per + 2;
+      return c;
     });
-    col = start + s.activities.length * 2;
+    col = start + s.activities.length * per;
     const block = {
       start: start,
       acts: acts,
@@ -115,7 +121,7 @@ function getLayout() {
     block.end = col - 1;
     return block;
   });
-  return { subjects: subjects, note: col, lastCol: col };
+  return { subjects: subjects, note: col, lastCol: col, per: per };
 }
 
 /** 해당 반·활동의 기록 담당 교사 */
@@ -152,6 +158,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('세특 도구')
     .addItem('시트 초기 설정 (없는 탭만 생성)', 'setupSheets')
+    .addItem('기존 탭을 최신 형식으로 업데이트 (데이터 유지)', 'migrateClassSheets')
     .addItem('현황 탭 다시 만들기', 'rebuildSummary')
     .addToUi();
 }
@@ -229,6 +236,77 @@ function setupSheets() {
   progress(msg);
 }
 
+/** 시트가 최신 형식(활동별 바이트 칸 포함)인지 확인 */
+function isLatestLayout(sh) {
+  const c = getLayout().subjects[0].acts[0];
+  return sh.getRange(4, c.bytes).getValue() === '바이트';
+}
+
+/**
+ * 기존 반별 탭을 최신 형식으로 업데이트 (명단·제출 내용·교사 기록을 그대로 옮김).
+ * 실행 시간이 길어 중간에 멈추면 다시 실행하세요. 이미 업데이트된 탭은 건너뜁니다.
+ */
+function migrateClassSheets() {
+  const ss = getSS();
+  const t0 = Date.now();
+  const LIMIT_MS = 4.5 * 60 * 1000;
+  const OLD = getLayout(true);
+  const NEW = getLayout();
+  const nRows = CONFIG.STUDENTS_PER_CLASS;
+  const done = [];
+  let unfinished = false;
+  const progress = function (text) {
+    Logger.log(text);
+    try { ss.toast(text, '세특 시트 업데이트', 5); } catch (e) { /* 무시 */ }
+  };
+
+  ss.getSheets().forEach(function (sh) {
+    if (sh.getName().slice(-BUILDING_SUFFIX.length) === BUILDING_SUFFIX) ss.deleteSheet(sh);
+  });
+
+  for (let n = 1; n <= CONFIG.CLASS_COUNT; n++) {
+    const name = className(n);
+    const old = ss.getSheetByName(name);
+    if (!old || isLatestLayout(old)) continue;
+    if (Date.now() - t0 > LIMIT_MS) { unfinished = true; break; }
+
+    // 1) 기존 데이터 읽기
+    const v = old.getRange(DATA_START, 1, nRows, OLD.lastCol).getValues();
+    const col = function (c) { return v.map(function (row) { return [row[c - 1]]; }); };
+
+    // 2) 새 형식으로 만들고 데이터 옮기기
+    const sh = ss.insertSheet(name + BUILDING_SUFFIX, old.getIndex());
+    buildClassSheet(sh, n);
+    const fixed = v.map(function (row) { return row.slice(COL.ID - 1, COL.SUBMITTED); });
+    sh.getRange(DATA_START, COL.ID, nRows, fixed[0].length).setValues(fixed);
+    CONFIG.SUBJECTS.forEach(function (s, si) {
+      const o = OLD.subjects[si];
+      const b = NEW.subjects[si];
+      o.acts.forEach(function (oc, i) {
+        sh.getRange(DATA_START, b.acts[i].sel, nRows, 1)
+          .setValues(col(oc.sel).map(function (x) { return [x[0] === true]; }));
+        sh.getRange(DATA_START, b.acts[i].memo, nRows, 1).setValues(col(oc.memo));
+      });
+      ['final', 'teacher', 'progress'].forEach(function (k) {
+        sh.getRange(DATA_START, b[k], nRows, 1).setValues(col(o[k]));
+      });
+    });
+    sh.getRange(DATA_START, NEW.note, nRows, 1).setValues(col(OLD.note));
+
+    // 3) 교체
+    ss.deleteSheet(old);
+    sh.setName(name);
+    SpreadsheetApp.flush();
+    done.push(name);
+    progress(name + ' 탭 업데이트 완료');
+  }
+
+  if (!unfinished) rebuildSummary();
+  progress((unfinished
+    ? '⏸ 실행 시간 한도로 중간에 멈췄습니다. migrateClassSheets 를 한 번 더 실행하면 이어서 진행합니다.\n'
+    : '✅ 업데이트 완료\n') + '업데이트한 탭: ' + (done.join(', ') || '없음 (이미 최신)'));
+}
+
 function buildClassSheet(sh, classNo) {
   const L = getLayout();
   const lastRow = DATA_START + CONFIG.STUDENTS_PER_CLASS - 1;
@@ -271,10 +349,11 @@ function buildClassSheet(sh, classNo) {
     s.activities.forEach(function (a, i) {
       const c = b.acts[i];
       const t = activityTeacher(s, i, classNo);
-      sh.getRange(3, c.sel, 1, 2).merge().setValue((i + 1) + '. ' + a.name + (t && !s.classTeachers ? '\n(' + t + ')' : ''))
+      sh.getRange(3, c.sel, 1, L.per).merge().setValue((i + 1) + '. ' + a.name + (t && !s.classTeachers ? '\n(' + t + ')' : ''))
         .setBackground(light).setFontWeight('bold').setWrap(true);
       sh.getRange(4, c.sel).setValue('선택');
       sh.getRange(4, c.memo).setValue('활동 기록');
+      sh.getRange(4, c.bytes).setValue('바이트');
       if (a.desc) sh.getRange(3, c.sel).setNote(a.desc);
     });
 
@@ -293,7 +372,7 @@ function buildClassSheet(sh, classNo) {
       sh.getRange(3, t[0], 2, 1).merge().setValue(t[1]);
     });
     sh.getRange(3, b.count, 2, 9).setBackground(light).setFontWeight('bold').setWrap(true);
-    sh.getRange(4, b.start, 1, s.activities.length * 2).setBackground(light);
+    sh.getRange(4, b.start, 1, s.activities.length * L.per).setBackground(light);
   });
 
   sh.getRange(2, L.note, 3, 1).merge().setValue('비고 (교사 간 메모)')
@@ -341,6 +420,17 @@ function buildClassSheet(sh, classNo) {
       sh.getRange(DATA_START, c, nRows, 1).setBackground(COLORS.formula);
     });
 
+    // 활동 기록별 바이트
+    b.acts.forEach(function (c) {
+      const fm = [];
+      for (let r = DATA_START; r <= lastRow; r++) {
+        const m = colLetter(c.memo) + r;
+        fm.push(['=IF(' + m + '="","",' + bytesFormula(m) + ')']);
+      }
+      sh.getRange(DATA_START, c.bytes, nRows, 1).setFormulas(fm)
+        .setHorizontalAlignment('center').setFontSize(9).setBackground(COLORS.formula);
+    });
+
     // 선택 체크박스
     b.acts.forEach(function (c) {
       sh.getRange(DATA_START, c.sel, nRows, 1).insertCheckboxes().setHorizontalAlignment('center');
@@ -383,7 +473,7 @@ function buildClassSheet(sh, classNo) {
       rules.push(SpreadsheetApp.newConditionalFormatRule()
         .whenFormulaSatisfied('=' + selRef + '<>TRUE')
         .setBackground(COLORS.inactive).setFontColor(COLORS.inactiveFont)
-        .setRanges([memoRange]).build());
+        .setRanges([memoRange, sh.getRange(DATA_START, c.bytes, nRows, 1)]).build());
       rules.push(SpreadsheetApp.newConditionalFormatRule()
         .whenFormulaSatisfied('=' + selRef + '=TRUE')
         .setBackground(COLORS.checked).setRanges([selRange]).build());
@@ -425,6 +515,7 @@ function buildClassSheet(sh, classNo) {
     b.acts.forEach(function (c) {
       sh.setColumnWidth(c.sel, 42);
       sh.setColumnWidth(c.memo, 180);
+      sh.setColumnWidth(c.bytes, 48);
     });
     sh.setColumnWidth(b.count, 55);
     sh.setColumnWidth(b.draft, 260);
@@ -451,7 +542,8 @@ function buildClassSheet(sh, classNo) {
 
   // 수식 열 실수 방지 (경고만 표시)
   L.subjects.forEach(function (b) {
-    [b.count, b.draft, b.draftBytes, b.len, b.bytes, b.status].forEach(function (c) {
+    b.acts.map(function (c) { return c.bytes; })
+      .concat([b.count, b.draft, b.draftBytes, b.len, b.bytes, b.status]).forEach(function (c) {
       sh.getRange(DATA_START, c, nRows, 1).protect()
         .setDescription('자동 계산 열 (' + sh.getName() + ')').setWarningOnly(true);
     });
@@ -682,6 +774,7 @@ function resolveStudent(id, name) {
 
   const sh = getSS().getSheetByName(className(cls));
   if (!sh) throw new Error('시트가 준비되지 않았습니다. 선생님께 문의하세요.');
+  if (!isLatestLayout(sh)) throw new Error('시트 업데이트 중입니다. 잠시 후 다시 시도하거나 선생님께 문의하세요.');
   const row = DATA_START + no - 1;
   const roster = normName(sh.getRange(row, COL.NAME).getValue());
 
