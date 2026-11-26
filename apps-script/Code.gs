@@ -40,6 +40,7 @@ const CONFIG = {
         { name: '생물의 진화 및 생물다양성 변화 과정 탐구', teacher: '유자현', desc: '' },
         { name: '통합과학 포트폴리오 활동(D)', teacher: '임형택', desc: '' },
         { name: '대멸종 판정에 대한 근거 기반 토론', teacher: '임형택', desc: '' },
+        { name: '진로 맞춤 자유주제 발표', teacher: '', desc: '본인의 진로와 연계한 자유주제 발표' },   // 담당 교사 정해지면 teacher 에 입력
       ],
     },
     {
